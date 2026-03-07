@@ -8,11 +8,12 @@ class MonoOrchestra {
         this.height = window.innerHeight;
 
         // Core Parameters
-        this.particleCount = 80000; // Slightly reduced to handle massive sizes gracefully
-        this.particleBaseSize = 0.5; // Dramatically increased to coin size
+        this.particleCount = 80000;
+        this.particleBaseSize = 0.5;
 
-        // Audio state placeholders
+        // Audio and Animation State
         this.audioData = { bass: 0, treble: 0, overall: 0 };
+        this.flowTime = 0; // Cumulative flow to prevent uTime * uBass shaking issue
 
         this.initScene();
         this.initParticles();
@@ -25,7 +26,7 @@ class MonoOrchestra {
 
     initScene() {
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x000000); // Pure Black
+        this.scene.background = new THREE.Color(0x000000);
         this.scene.fog = new THREE.FogExp2(0x000000, 0.015);
 
         this.camera = new THREE.PerspectiveCamera(60, this.width / this.height, 0.1, 1000);
@@ -42,7 +43,6 @@ class MonoOrchestra {
         this.controls.enablePan = false;
         this.controls.enableZoom = false;
 
-        // Mouse tracking for "Artificial Gravity"
         this.mouse = new THREE.Vector2(-9999, -9999);
         this.raycaster = new THREE.Raycaster();
         this.plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
@@ -53,10 +53,10 @@ class MonoOrchestra {
     initParticles() {
         const geometry = new THREE.PlaneGeometry(this.particleBaseSize, this.particleBaseSize);
 
-        // Pure White Material
         this.material = new THREE.ShaderMaterial({
             uniforms: {
                 uTime: { value: 0 },
+                uFlow: { value: 0 }, // New uniform for smooth accumulation
                 uMouse: { value: new THREE.Vector3() },
                 uHoverState: { value: 0 },
                 uBass: { value: 0 },
@@ -64,6 +64,7 @@ class MonoOrchestra {
             },
             vertexShader: `
                 uniform float uTime;
+                uniform float uFlow;
                 uniform vec3 uMouse;
                 uniform float uBass;
                 uniform float uTreble;
@@ -74,7 +75,6 @@ class MonoOrchestra {
                 varying vec2 vUv;
                 varying float vAlpha;
                 
-                // Simplex 3D Noise function (omitted full impl for brevity, using a fast pseudo-noise)
                 vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
                 vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
                 vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
@@ -127,46 +127,23 @@ class MonoOrchestra {
 
                 void main() {
                     vUv = uv;
-                    
-                    // Extract instance matrix pos
                     vec3 iPos = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
                     
-                    // Anti-Gravity Flow (moves based on time + Bass)
-                    float flowSpeed = uTime * (0.06 + uBass * 0.15); // Slightly faster, majestic flow
+                    // FIXED: Use a pre-calculated cumulative uFlow instead of (uTime * reactive_factor)
+                    float flow = uFlow;
                     vec3 noisePos = iPos * 0.05 + aRandom * 10.0;
                     
-                    float nx = snoise(noisePos + vec3(flowSpeed, 0.0, 0.0));
-                    float ny = snoise(noisePos + vec3(0.0, flowSpeed, 0.0));
-                    float nz = snoise(noisePos + vec3(0.0, 0.0, flowSpeed));
+                    float nx = snoise(noisePos + vec3(flow, 0.0, 0.0));
+                    float ny = snoise(noisePos + vec3(0.0, flow, 0.0));
+                    float nz = snoise(noisePos + vec3(0.0, 0.0, flow));
                     
-                    vec3 fluidOffset = vec3(nx, ny, nz) * (1.5 + uTreble * 2.5); // increased dynamic reaction
-                    
+                    vec3 fluidOffset = vec3(nx, ny, nz) * (1.5 + uTreble * 2.5);
                     vec3 finalPos = iPos + fluidOffset;
                     
-                    /* 
-                     * Interactive Gravity (Mouse) - Disabled as requested
-                    vec3 dirToMouse = uMouse - finalPos;
-                    float distToMouse = length(dirToMouse);
-                    
-                    // Pull and then swirl around mouse
-                    if (distToMouse < 15.0) {
-                        float force = (15.0 - distToMouse) / 15.0;
-                        // Cross product for swirl
-                        vec3 swirlAxis = vec3(0.0, 0.0, 1.0);
-                        vec3 tangent = normalize(cross(dirToMouse, swirlAxis));
-                        
-                        finalPos += tangent * force * 5.0;  // Swirl
-                        finalPos -= normalize(dirToMouse) * force * 2.0; // Repel slightly so it creates a ring
-                    }
-                    */
-                    
-                    vAlpha = 1.0 - (abs(finalPos.z) / 40.0); // Fade out based on depth
+                    vAlpha = 1.0 - (abs(finalPos.z) / 40.0);
 
                     vec4 mvPosition = viewMatrix * vec4(finalPos, 1.0);
-                    
-                    // Billboarding (always face camera) - Apply varying instance scales
                     mvPosition.xyz += position * aScale; 
-
                     gl_Position = projectionMatrix * mvPosition;
                 }
             `,
@@ -178,7 +155,6 @@ class MonoOrchestra {
                     float distance = length(cxy);
                     if (distance > 1.0) discard;
                     
-                    // Exponential falloff for a realistic glowing core (star-like)
                     float intensity = exp(-distance * 3.0); 
                     float alpha = intensity * vAlpha;
                     
@@ -197,13 +173,10 @@ class MonoOrchestra {
         const scales = new Float32Array(this.particleCount);
 
         for (let i = 0; i < this.particleCount; i++) {
-            // Organic Galaxy Distribution
-            // Concentrate particles in the center, tapering off towards the edges exponentially
             const radius = Math.pow(Math.random(), 3) * 60;
             const theta = Math.random() * Math.PI * 2;
             const phi = Math.acos((Math.random() * 2) - 1);
 
-            // Convert spherical to cartesian, squashing the Y-axis to form a disc/lens shape
             const x = radius * Math.sin(phi) * Math.cos(theta);
             const y = radius * Math.sin(phi) * Math.sin(theta) * 0.35;
             const z = radius * Math.cos(phi);
@@ -216,7 +189,6 @@ class MonoOrchestra {
             randoms[i * 3 + 1] = Math.random();
             randoms[i * 3 + 2] = Math.random();
 
-            // Varied depth/sizes: most are tiny cosmic dust, a small percentage are huge bright anchor stars
             const isBigStar = Math.random() > 0.985;
             scales[i] = isBigStar ? (Math.random() * 2.5 + 1.0) : (Math.random() * 0.4 + 0.05);
         }
@@ -244,24 +216,31 @@ class MonoOrchestra {
             this.raycaster.ray.intersectPlane(this.plane, this.targetMouse3D);
         });
 
-        // Hide mouse interactions if mouse leaves canvas
         window.addEventListener('mouseout', () => {
             this.targetMouse3D.set(-9999, -9999, 0);
         });
     }
 
+    resetFlow() {
+        this.flowTime = 0;
+        if (this.material) {
+            this.material.uniforms.uFlow.value = 0;
+        }
+    }
+
     animate() {
         requestAnimationFrame(this.animate);
-        const elapsedTime = this.clock.getElapsedTime();
+        const deltaTime = this.clock.getDelta();
+        
+        // Accumulate flow based on bass (0.06 base speed + bass reaction)
+        this.flowTime += deltaTime * (0.06 + this.audioData.bass * 0.15);
 
-        // Smooth mouse interpolation
         this.currentMouse3D.lerp(this.targetMouse3D, 0.1);
 
         if (this.material) {
-            this.material.uniforms.uTime.value = elapsedTime;
+            this.material.uniforms.uTime.value = this.clock.getElapsedTime();
+            this.material.uniforms.uFlow.value = this.flowTime;
             this.material.uniforms.uMouse.value.copy(this.currentMouse3D);
-
-            // Audio Uniforms will be updated from external script later
             this.material.uniforms.uBass.value = this.audioData.bass;
             this.material.uniforms.uTreble.value = this.audioData.treble;
         }
