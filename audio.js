@@ -56,10 +56,7 @@ class AudioVisualizer {
                     this.playPauseBtn.innerText = "PAUSE";
                     this.indicator.classList.add('active');
 
-                    // Reset particle flow on track change (Cache clear effect)
-                    if (window.monoApp) {
-                        window.monoApp.resetFlow();
-                    }
+                    // Animation now stays continuous as requested
                 }).catch(err => {
                     console.log("Audio play error (usually means missing mp3 file):", err);
                     this.currentTrackNameEl.innerText = "[FILE NOT FOUND] Place MP3 in /audio/";

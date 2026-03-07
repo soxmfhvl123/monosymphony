@@ -137,7 +137,9 @@ class MonoOrchestra {
                     float ny = snoise(noisePos + vec3(0.0, flow, 0.0));
                     float nz = snoise(noisePos + vec3(0.0, 0.0, flow));
                     
-                    vec3 fluidOffset = vec3(nx, ny, nz) * (1.5 + uTreble * 2.5);
+                    // INCREASED REACTIVITY: multiplied uTreble effect
+                    // EVEN HIGHER REACTIVITY: 10x multiplier for treble
+                    vec3 fluidOffset = vec3(nx, ny, nz) * (1.5 + uTreble * 10.0);
                     vec3 finalPos = iPos + fluidOffset;
                     
                     vAlpha = 1.0 - (abs(finalPos.z) / 40.0);
@@ -232,8 +234,9 @@ class MonoOrchestra {
         requestAnimationFrame(this.animate);
         const deltaTime = this.clock.getDelta();
         
-        // Accumulate flow based on bass (0.06 base speed + bass reaction)
-        this.flowTime += deltaTime * (0.06 + this.audioData.bass * 0.15);
+        // INCREASED REACTIVITY: higher base speed and stronger bass reaction
+        // EVEN HIGHER REACTIVITY: stronger bass influence
+        this.flowTime += deltaTime * (0.1 + this.audioData.bass * 0.6);
 
         this.currentMouse3D.lerp(this.targetMouse3D, 0.1);
 
